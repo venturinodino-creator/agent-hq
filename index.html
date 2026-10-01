@@ -150,7 +150,6 @@ dialog p{color:var(--dim)}
     <div class="grow"></div>
     <div class="ctl">
       <input class="inp" id="q" placeholder="filter repos / agents…" aria-label="Filter">
-      <button class="btn" id="btnDormant">dormant: hidden</button>
       <button class="btn" id="btnRefresh">↻ sync</button>
       <span class="sync" id="sync">—</span>
     </div>
@@ -249,7 +248,7 @@ const store = {
 };
 let USER = store.get('hq.user', CONFIG.user);
 let TOKEN = store.get('hq.token', '');
-let STATE = { source:'', repos:[], selected:'__all', filter:'', demo:false, fetchedAt:null, dormant:store.get('hq.dormant',false) };
+let STATE = { source:'', repos:[], selected:'__all', filter:'', demo:false, fetchedAt:null, dormant:false };
 const isDormant = r => (Date.now()-new Date(r.pushed))/DAY > 60;
 
 const AI_RE = /co-authored-by:\s*claude|claude-session|generated with \[claude|🤖/i;
@@ -409,7 +408,6 @@ function render(){
   $('#heroTitle').textContent = sel? sel.name.toUpperCase().replace(/-/g,'_') : 'COMMAND GRID';
   $('#heroSub').textContent = sel? '// REPO · '+sel.lang.toUpperCase() : '// LIVE ENGINE · '+USER.toUpperCase();
   $('#heroMeta').textContent = `${commits.length} commits · ${ag.length} agents · ${all.length} repos`;
-  $('#btnDormant').textContent='dormant: '+(STATE.dormant?'shown':'hidden');
   drawGraph(repos.filter(r=>STATE.dormant||!isDormant(r)||r===sel), sel);
   drawDetail(sel);
 
@@ -531,7 +529,6 @@ document.addEventListener('click',e=>{
 });
 $('#q').addEventListener('input',e=>{ STATE.filter=e.target.value.trim().toLowerCase(); render(); });
 $('#btnRefresh').onclick=()=>load(true);
-$('#btnDormant').onclick=()=>{ STATE.dormant=!STATE.dormant; store.set('hq.dormant',STATE.dormant); render(); };
 function ask(title,text,val,type,cb){
   const d=$('#dlg'); $('#dlgTitle').textContent=title; $('#dlgText').innerHTML=text;
   const i=$('#dlgInput'); i.type=type; i.value=val; d.showModal();
