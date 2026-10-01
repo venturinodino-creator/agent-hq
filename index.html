@@ -150,7 +150,6 @@ dialog p{color:var(--dim)}
     <div class="grow"></div>
     <div class="ctl">
       <input class="inp" id="q" placeholder="filter repos / agents…" aria-label="Filter">
-      <button class="btn" id="btnRefresh">↻ sync</button>
       <span class="sync" id="sync">—</span>
     </div>
   </header>
@@ -528,7 +527,6 @@ document.addEventListener('click',e=>{
   if(a){ if(a.dataset.repo && STATE.repos.some(r=>r.name===a.dataset.repo)) select(a.dataset.repo); else if(a.dataset.url) window.open(a.dataset.url,'_blank','noopener'); }
 });
 $('#q').addEventListener('input',e=>{ STATE.filter=e.target.value.trim().toLowerCase(); render(); });
-$('#btnRefresh').onclick=()=>load(true);
 function ask(title,text,val,type,cb){
   const d=$('#dlg'); $('#dlgTitle').textContent=title; $('#dlgText').innerHTML=text;
   const i=$('#dlgInput'); i.type=type; i.value=val; d.showModal();
