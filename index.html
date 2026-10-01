@@ -146,6 +146,7 @@ svg#graph{position:absolute;inset:0;width:100%;height:100%}
     <div class="crumbs" id="crumbs">venturinodino-creator / overview</div>
     <div class="grow"></div>
     <div class="ctl">
+      <button class="btn" id="btnDormant">dormant: hidden</button>
       <span class="sync" id="sync">—</span>
     </div>
   </header>
@@ -228,7 +229,7 @@ const store = {
   set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch{} }
 };
 const USER = CONFIG.user;
-let STATE = { source:'', repos:[], selected:'__all', filter:'', demo:false, fetchedAt:null, dormant:false };
+let STATE = { source:'', repos:[], selected:'__all', filter:'', demo:false, fetchedAt:null, dormant:store.get('hq.dormant',false) };
 const isDormant = r => (Date.now()-new Date(r.pushed))/DAY > 60;
 
 const AI_RE = /co-authored-by:\s*claude|claude-session|generated with \[claude|🤖/i;
@@ -382,6 +383,7 @@ function render(){
   $('#heroTitle').textContent = sel? sel.name.toUpperCase().replace(/-/g,'_') : 'COMMAND GRID';
   $('#heroSub').textContent = sel? '// REPO · '+sel.lang.toUpperCase() : '// LIVE ENGINE · '+USER.toUpperCase();
   $('#heroMeta').textContent = `${commits.length} commits · ${ag.length} agents · ${all.length} repos`;
+  $('#btnDormant').textContent='dormant: '+(STATE.dormant?'shown':'hidden');
   drawGraph(repos.filter(r=>STATE.dormant||!isDormant(r)||r===sel), sel);
   drawDetail(sel);
 
@@ -501,6 +503,7 @@ document.addEventListener('click',e=>{
   const a=e.target.closest('.agents li');
   if(a){ if(a.dataset.repo && STATE.repos.some(r=>r.name===a.dataset.repo)) select(a.dataset.repo); else if(a.dataset.url) window.open(a.dataset.url,'_blank','noopener'); }
 });
+$('#btnDormant').onclick=()=>{ STATE.dormant=!STATE.dormant; store.set('hq.dormant',STATE.dormant); render(); };
 let rt; addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(render,120)});
 setInterval(()=>{$('#sync').textContent=syncLabel()},30000);
 load();
