@@ -225,11 +225,9 @@ const CONFIG = {
 const $ = s => document.querySelector(s);
 const store = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v==null?d:JSON.parse(v);}catch{return d} },
-  set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch{} },
-  del(k){ try{ localStorage.removeItem(k);}catch{} }
+  set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch{} }
 };
-let USER = store.get('hq.user', CONFIG.user);
-let TOKEN = store.get('hq.token', '');
+const USER = CONFIG.user;
 let STATE = { source:'', repos:[], selected:'__all', filter:'', demo:false, fetchedAt:null, dormant:false };
 const isDormant = r => (Date.now()-new Date(r.pushed))/DAY > 60;
 
@@ -245,7 +243,6 @@ const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>
 /* ---------- GitHub ---------- */
 async function gh(path){
   const h = { 'Accept':'application/vnd.github+json' };
-  if(TOKEN) h.Authorization = 'Bearer '+TOKEN;
   const r = await fetch('https://api.github.com'+path,{headers:h});
   if(r.status===404||r.status===409) return null;          // e.g. empty repo / no pages
   if(!r.ok){ const e=new Error(r.status===403?'rate-limit':'http '+r.status); e.status=r.status; throw e; }
@@ -269,26 +266,22 @@ async function snapshot(){
 }
 
 async function load(force=false){
-  const key='hq.cache.'+USER+(TOKEN?'.auth':'');
+  const key='hq.cache.'+USER;
   const cached = store.get(key,null);
   $('#sync').textContent='syncing…'; banner('');
   STATE.source='';
-  // 1 · snapshot (skipped when a personal token is set — then live data is cheap)
-  if(!TOKEN){
-    const d=await snapshot();
-    if(d){ STATE.repos=d.repos.filter(r=>r.name!==CONFIG.snapshotRepo && !CONFIG.hide.includes(r.name));
-      STATE.fetchedAt=new Date(d.generatedAt).getTime(); STATE.demo=false; STATE.source='snapshot';
-      store.set(key,{at:STATE.fetchedAt,repos:STATE.repos}); render(); return; }
-  }
+  // 1 · snapshot
+  const d=await snapshot();
+  if(d){ STATE.repos=d.repos.filter(r=>r.name!==CONFIG.snapshotRepo && !CONFIG.hide.includes(r.name));
+    STATE.fetchedAt=new Date(d.generatedAt).getTime(); STATE.demo=false; STATE.source='snapshot';
+    store.set(key,{at:STATE.fetchedAt,repos:STATE.repos}); render(); return; }
   if(!force && cached && Date.now()-cached.at < CONFIG.cacheMinutes*6e4){
     STATE.repos=cached.repos; STATE.fetchedAt=cached.at; STATE.demo=false; render(); return;
   }
   // 2 · live API, lean
   try{
-    const list = TOKEN
-      ? await gh('/user/repos?per_page=100&sort=pushed&affiliation=owner')
-      : await gh(`/users/${USER}/repos?per_page=100&sort=pushed`);
-    const repos = (list||[]).filter(r=>r.name!==CONFIG.snapshotRepo && !CONFIG.hide.includes(r.name) && (!TOKEN || r.owner.login.toLowerCase()===USER.toLowerCase()));
+    const list = await gh(`/users/${USER}/repos?per_page=100&sort=pushed`);
+    const repos = (list||[]).filter(r=>r.name!==CONFIG.snapshotRepo && !CONFIG.hide.includes(r.name));
     const since = new Date(Date.now()-56*DAY).toISOString();
     const out = [];
     for(const r of repos){                       // sequential + errors propagate → never caches half-empty data
@@ -296,8 +289,7 @@ async function load(force=false){
       if(!active){ out.push(slim(r,[],[],null)); continue; }
       const commits = await gh(`/repos/${r.full_name}/commits?per_page=100&since=${since}`);
       const runs    = await gh(`/repos/${r.full_name}/actions/runs?per_page=20`);
-      const pulls   = TOKEN ? await gh(`/repos/${r.full_name}/pulls?state=open&per_page=50`) : null;
-      out.push(slim(r, commits||[], runs?.workflow_runs||[], pulls));
+      out.push(slim(r, commits||[], runs?.workflow_runs||[], null));
     }
     STATE.repos=out; STATE.fetchedAt=Date.now(); STATE.demo=false; STATE.source='live';
     store.set(key,{at:STATE.fetchedAt,repos:out});
