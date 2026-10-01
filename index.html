@@ -151,7 +151,6 @@ dialog p{color:var(--dim)}
     <div class="ctl">
       <input class="inp" id="q" placeholder="filter repos / agents…" aria-label="Filter">
       <button class="btn" id="btnDormant">dormant: hidden</button>
-      <button class="btn" id="btnUser">user</button>
       <button class="btn" id="btnRefresh">↻ sync</button>
       <span class="sync" id="sync">—</span>
     </div>
@@ -538,8 +537,6 @@ function ask(title,text,val,type,cb){
   const i=$('#dlgInput'); i.type=type; i.value=val; d.showModal();
   d.onclose=()=>cb(d.returnValue,i.value.trim());
 }
-$('#btnUser').onclick=()=>ask('GitHub user','Whose repos should the grid show?',USER,'text',(v,val)=>{
-  if(v==='ok'&&val){USER=val;store.set('hq.user',val);STATE.selected='__all';load(true);} if(v==='clear'){USER=CONFIG.user;store.del('hq.user');load(true);} });
 let rt; addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(render,120)});
 setInterval(()=>{$('#sync').textContent=syncLabel()},30000);
 load();
