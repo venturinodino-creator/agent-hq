@@ -258,14 +258,14 @@ async function gh(path){
    2. live GitHub API, lean mode: only repos active in the last 60 days get detail calls
    3. last good cache in this browser                                                   */
 async function snapshot(){
-  const urls=[];
+  // Read every copy we can reach and keep the freshest one (raw GitHub updates even when Pages lags behind)
+  const urls=[`https://raw.githubusercontent.com/${USER}/${CONFIG.snapshotRepo}/main/data.json`];
   if(location.protocol.startsWith('http')) urls.push('./data.json');
-  urls.push(`https://raw.githubusercontent.com/${USER}/${CONFIG.snapshotRepo}/main/data.json`);
-  for(const u of urls){
-    try{ const r=await fetch(u+'?t='+Math.floor(Date.now()/6e4),{cache:'no-store'}); if(!r.ok) continue;
-      const d=await r.json(); if(d && Array.isArray(d.repos) && d.repos.length) return d; }catch{}
-  }
-  return null;
+  const got=await Promise.all(urls.map(async u=>{
+    try{ const r=await fetch(u+'?t='+Math.floor(Date.now()/6e4),{cache:'no-store'}); if(!r.ok) return null;
+      const d=await r.json(); return (d && Array.isArray(d.repos) && d.repos.length) ? d : null; }catch{ return null; }
+  }));
+  return got.filter(Boolean).sort((x,y)=>new Date(y.generatedAt)-new Date(x.generatedAt))[0] || null;
 }
 
 async function load(force=false){
