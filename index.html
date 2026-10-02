@@ -57,6 +57,9 @@ button,input{font:inherit;color:inherit}
 .nav li.on{background:#0f2129;color:var(--cyan);border-left:2px solid var(--cyan)}
 .nav .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .nav .k{font-size:10px;color:var(--dim)}
+.nav .pv{background:none;border:0;padding:0 2px;cursor:pointer;color:var(--dim);font-size:10px;line-height:1;opacity:0}
+.nav li:hover .pv,.nav .pv:focus-visible{opacity:1}
+.nav .pv.on{opacity:1;color:var(--amber)}
 .sec{padding:10px 14px 4px;font-size:10px;letter-spacing:.14em;color:var(--dim)}
 
 /* center */
@@ -158,6 +161,7 @@ svg#graph{position:absolute;inset:0;width:100%;height:100%}
     <div class="crumbs" id="crumbs">venturinodino-creator / overview</div>
     <div class="grow"></div>
     <div class="ctl">
+      <button class="btn" id="btnShare">view: all</button>
       <button class="btn" id="btnDormant">dormant: hidden</button>
       <span class="sync" id="sync">—</span>
     </div>
@@ -241,7 +245,8 @@ const store = {
   set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch{} }
 };
 const USER = CONFIG.user;
-let STATE = { source:'', repos:[], selected:'__all', agent:null, filter:'', demo:false, fetchedAt:null, dormant:store.get('hq.dormant',false) };
+// all = every repo as loaded; repos = what the page shows (all, minus marked repos while sharing)
+let STATE = { marked:new Set(store.get('hq.marked',[])), shared:store.get('hq.shared',false), source:'', all:[], repos:[], selected:'__all', agent:null, filter:'', demo:false, fetchedAt:null, dormant:store.get('hq.dormant',false) };
 const isDormant = r => (Date.now()-new Date(r.pushed))/DAY > 60;
 
 const AI_RE = /co-authored-by:\s*claude|claude-session|generated with \[claude|🤖/i;
@@ -285,11 +290,11 @@ async function load(force=false){
   STATE.source='';
   // 1 · snapshot
   const d=await snapshot();
-  if(d){ STATE.repos=d.repos.filter(r=>r.name!==CONFIG.snapshotRepo && !CONFIG.hide.includes(r.name));
+  if(d){ STATE.all=d.repos.filter(r=>r.name!==CONFIG.snapshotRepo && !CONFIG.hide.includes(r.name));
     STATE.fetchedAt=new Date(d.generatedAt).getTime(); STATE.demo=false; STATE.source='snapshot';
-    store.set(key,{at:STATE.fetchedAt,repos:STATE.repos}); render(); return; }
+    store.set(key,{at:STATE.fetchedAt,repos:STATE.all}); render(); return; }
   if(!force && cached && Date.now()-cached.at < CONFIG.cacheMinutes*6e4){
-    STATE.repos=cached.repos; STATE.fetchedAt=cached.at; STATE.demo=false; render(); return;
+    STATE.all=cached.repos; STATE.fetchedAt=cached.at; STATE.demo=false; render(); return;
   }
   // 2 · live API, lean
   try{
@@ -304,14 +309,14 @@ async function load(force=false){
       const runs    = await gh(`/repos/${r.full_name}/actions/runs?per_page=100`);
       out.push(slim(r, commits||[], runs?.workflow_runs||[], null));
     }
-    STATE.repos=out; STATE.fetchedAt=Date.now(); STATE.demo=false; STATE.source='live';
+    STATE.all=out; STATE.fetchedAt=Date.now(); STATE.demo=false; STATE.source='live';
     store.set(key,{at:STATE.fetchedAt,repos:out});
   }catch(e){
-    if(cached){ STATE.repos=cached.repos; STATE.fetchedAt=cached.at;
+    if(cached){ STATE.all=cached.repos; STATE.fetchedAt=cached.at;
       banner(e.message==='rate-limit'
         ? 'GitHub\'s free hourly limit is used up — showing the last good data. Set up the hourly snapshot (see README) and this never happens.'
         : 'Could not reach GitHub — showing the last good data.'); }
-    else { STATE.repos=demo(); STATE.demo=true; STATE.fetchedAt=Date.now();
+    else { STATE.all=demo(); STATE.demo=true; STATE.fetchedAt=Date.now();
       banner('Demo data — could not reach GitHub ('+esc(e.message)+'). Set up the hourly snapshot (see README) for live data.'); }
   }
   render();
@@ -349,14 +354,15 @@ const COL = {ok:'#41e08a',idle:'#f2b84b',fail:'#ff5d6c',run:'#3fd7e8',dormant:'#
    The satellite dots, the agents list and the agent detail all read from here. */
 const wfStatus = w => w.status!=='completed'?'running': w.concl==='failure'?'fail': w.concl==='success'?'ok':'idle';
 const runResult = x => x.status!=='completed'?'running': x.concl==='success'?'succeeded': x.concl==='failure'?'failed': (x.concl||'no result');
+const localAgents = () => CONFIG.localAgents.filter(a=>!(STATE.shared && STATE.marked.has(a.repo)));
 const localAgent = a => ({...a, id:(a.repo||'')+'::'+a.name, live:false, kind:a.schedule||'Local', date:a.lastRun});
 function repoAgents(r){
   return [...r.workflows.map(w=>({ id:r.name+'::'+w.name, live:true, name:w.name, repo:r.name, kind:'GitHub Action',
             role:w.event, date:w.date, url:w.url, status:wfStatus(w), run:w })),
-          ...CONFIG.localAgents.filter(a=>a.repo===r.name).map(localAgent)];
+          ...localAgents().filter(a=>a.repo===r.name).map(localAgent)];
 }
 const allAgents = () => [...STATE.repos.flatMap(repoAgents),
-  ...CONFIG.localAgents.filter(a=>!STATE.repos.some(r=>r.name===a.repo)).map(localAgent)];
+  ...localAgents().filter(a=>!STATE.repos.some(r=>r.name===a.repo)).map(localAgent)];
 const agentCol = a => a.live ? (a.status==='running'?COL.run: a.status==='fail'?COL.fail: COL.ok)
                              : (COL[a.status==='running'?'run':a.status]||COL.idle);
 
@@ -372,6 +378,10 @@ function agents(){
 
 /* ---------- render ---------- */
 function render(){
+  // while sharing, marked repos are dropped here, so nothing below can draw them or count them
+  STATE.repos = STATE.shared ? STATE.all.filter(r=>!STATE.marked.has(r.name)) : STATE.all;
+  if(STATE.selected!=='__all' && !STATE.repos.some(r=>r.name===STATE.selected)){ STATE.selected='__all'; STATE.agent=null; }
+  $('#btnShare').textContent='view: '+(STATE.shared?'shared':'all');
   const f=STATE.filter;
   const repos=STATE.repos.filter(r=>!f || (r.name+' '+r.desc+' '+r.lang).toLowerCase().includes(f));
   $('#sync').textContent = syncLabel();
@@ -379,7 +389,7 @@ function render(){
 
   // sidebar
   $('#nav').innerHTML = repos.map(r=>`<li data-id="${esc(r.name)}" class="${STATE.selected===r.name?'on':''}">
-    <span class="dot ${DOT[health(r)]}"></span><span class="n">${esc(r.name)}</span><span class="k">${ago(r.pushed)}</span></li>`).join('')
+    <span class="dot ${DOT[health(r)]}"></span><span class="n">${esc(r.name)}</span><span class="k">${ago(r.pushed)}</span>${STATE.shared?'':`<button class="pv${STATE.marked.has(r.name)?' on':''}" data-pv="${esc(r.name)}" title="${STATE.marked.has(r.name)?'Hidden in shared view. Click to show it again':'Hide this repo in shared view'}" aria-pressed="${STATE.marked.has(r.name)}">${STATE.marked.has(r.name)?'●':'○'}</button>`}</li>`).join('')
     || '<li><span class="n">No repos</span></li>';
   document.querySelector('#navSys li').classList.toggle('on',STATE.selected==='__all');
 
@@ -488,7 +498,7 @@ function drawGraph(repos, sel){
 
 function drawDetail(r){
   const el=$('#detail');
-  if(!r){ el.hidden=true; return; }
+  if(!r){ el.hidden=true; el.innerHTML=''; return; }
   const weeks=[...Array(8)].map((_,i)=>({i, all:0, ai:0}));
   r.commits.forEach(c=>{ const w=Math.floor((Date.now()-new Date(c.date))/(7*DAY)); if(w<8){ weeks[w].all++; if(c.ai) weeks[w].ai++; }});
   const max=Math.max(1,...weeks.map(w=>w.all)), ai=r.commits.filter(c=>c.ai).length;
@@ -568,6 +578,8 @@ document.addEventListener('click',e=>{
     setTimeout(()=>document.querySelector('.sat.on')?.classList.add('zoom'),30); return; }
   const back=e.target.closest('[data-back]');
   if(back){ e.preventDefault(); select(back.dataset.back); return; }
+  const pv=e.target.closest('[data-pv]');
+  if(pv){ const m=STATE.marked, id=pv.dataset.pv; m.has(id)?m.delete(id):m.add(id); store.set('hq.marked',[...m]); render(); return; }
   const n=e.target.closest('.nav li[data-id], .repo-node');
   if(n){ select(n.dataset.id); return; }
   const a=e.target.closest('.agents li');
@@ -576,6 +588,7 @@ document.addEventListener('click',e=>{
 // mousemove rather than mouseout: selecting an agent can re-centre the grid and move the dot out from under the cursor
 $('#graph').addEventListener('mousemove',e=>{ const z=document.querySelector('.sat.zoom');
   if(z && !z.contains(e.target)) z.classList.remove('zoom'); });
+$('#btnShare').onclick=()=>{ STATE.shared=!STATE.shared; store.set('hq.shared',STATE.shared); render(); };
 $('#btnDormant').onclick=()=>{ STATE.dormant=!STATE.dormant; store.set('hq.dormant',STATE.dormant); render(); };
 let rt; addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(render,120)});
 setInterval(()=>{$('#sync').textContent=syncLabel()},30000);
