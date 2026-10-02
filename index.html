@@ -235,7 +235,6 @@ const CONFIG = {
   ],
   // Repo that holds this page + the hourly snapshot Action (data.json)
   snapshotRepo: 'agent-hq',
-  cacheMinutes: 30,
 };
 /* ====================================================== */
 
@@ -249,29 +248,15 @@ const USER = CONFIG.user;
 let STATE = { marked:new Set(store.get('hq.marked',[])), shared:store.get('hq.shared',false), source:'', all:[], repos:[], selected:'__all', agent:null, filter:'', demo:false, fetchedAt:null, dormant:store.get('hq.dormant',false) };
 const isDormant = r => (Date.now()-new Date(r.pushed))/DAY > 60;
 
-const AI_RE = /co-authored-by:\s*claude|claude-session|generated with \[claude|🤖/i;
-const CLAUDE_RE = /claude/i;
-const BOT_RE = /\[bot\]|copilot|github-actions|actions-user/i;
 const DAY = 864e5;
 const ago = d => { if(!d) return '—'; const s=(Date.now()-new Date(d))/1000;
   if(s<60) return 'now'; if(s<3600) return Math.floor(s/60)+'m'; if(s<86400) return Math.floor(s/3600)+'h';
   return Math.floor(s/86400)+'d'; };
 const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-/* ---------- GitHub ---------- */
-async function gh(path){
-  const h = { 'Accept':'application/vnd.github+json' };
-  const r = await fetch('https://api.github.com'+path,{headers:h});
-  if(r.status===404||r.status===409) return null;          // e.g. empty repo / no pages
-  if(!r.ok){ const e=new Error(r.status===403?'rate-limit':'http '+r.status); e.status=r.status; throw e; }
-  return r.json();
-}
-
-/* Data sources, in order:
-   1. data.json snapshot written every hour by the GitHub Action in your agent-hq repo
-      (uses GitHub's built-in credentials, so no token and no rate limit for you)
-   2. live GitHub API, lean mode: only repos active in the last 60 days get detail calls
-   3. last good cache in this browser                                                   */
+/* The page only ever reads data.json, the snapshot written by the GitHub Action in the agent-hq repo.
+   It never calls the GitHub API itself, so it cannot show a repo the snapshot left out.
+   If the snapshot can't be loaded it falls back to this browser's last good copy, then to demo data. */
 async function snapshot(){
   // Read every copy we can reach and keep the freshest one (raw GitHub updates even when Pages lags behind)
   const urls=[`https://raw.githubusercontent.com/${USER}/${CONFIG.snapshotRepo}/main/data.json`];
@@ -283,58 +268,20 @@ async function snapshot(){
   return got.filter(Boolean).sort((x,y)=>new Date(y.generatedAt)-new Date(x.generatedAt))[0] || null;
 }
 
-async function load(force=false){
+async function load(){
   const key='hq.cache.'+USER;
-  const cached = store.get(key,null);
   $('#sync').textContent='syncing…'; banner('');
   STATE.source='';
-  // 1 · snapshot
   const d=await snapshot();
   if(d){ STATE.all=d.repos.filter(r=>r.name!==CONFIG.snapshotRepo && !CONFIG.hide.includes(r.name));
     STATE.fetchedAt=new Date(d.generatedAt).getTime(); STATE.demo=false; STATE.source='snapshot';
     store.set(key,{at:STATE.fetchedAt,repos:STATE.all}); render(); return; }
-  if(!force && cached && Date.now()-cached.at < CONFIG.cacheMinutes*6e4){
-    STATE.all=cached.repos; STATE.fetchedAt=cached.at; STATE.demo=false; render(); return;
-  }
-  // 2 · live API, lean
-  try{
-    const list = await gh(`/users/${USER}/repos?per_page=100&sort=pushed`);
-    const repos = (list||[]).filter(r=>r.name!==CONFIG.snapshotRepo && !CONFIG.hide.includes(r.name));
-    const since = new Date(Date.now()-56*DAY).toISOString();
-    const out = [];
-    for(const r of repos){                       // sequential + errors propagate → never caches half-empty data
-      const active = (Date.now()-new Date(r.pushed_at))/DAY <= 60;
-      if(!active){ out.push(slim(r,[],[],null)); continue; }
-      const commits = await gh(`/repos/${r.full_name}/commits?per_page=100&since=${since}`);
-      const runs    = await gh(`/repos/${r.full_name}/actions/runs?per_page=100`);
-      out.push(slim(r, commits||[], runs?.workflow_runs||[], null));
-    }
-    STATE.all=out; STATE.fetchedAt=Date.now(); STATE.demo=false; STATE.source='live';
-    store.set(key,{at:STATE.fetchedAt,repos:out});
-  }catch(e){
-    if(cached){ STATE.all=cached.repos; STATE.fetchedAt=cached.at;
-      banner(e.message==='rate-limit'
-        ? 'GitHub\'s free hourly limit is used up — showing the last good data. Set up the hourly snapshot (see README) and this never happens.'
-        : 'Could not reach GitHub — showing the last good data.'); }
-    else { STATE.all=demo(); STATE.demo=true; STATE.fetchedAt=Date.now();
-      banner('Demo data — could not reach GitHub ('+esc(e.message)+'). Set up the hourly snapshot (see README) for live data.'); }
-  }
+  const cached=store.get(key,null);
+  if(cached){ STATE.all=cached.repos; STATE.fetchedAt=cached.at; STATE.demo=false;
+    banner('Could not load the snapshot — showing the last good data.'); }
+  else { STATE.all=demo(); STATE.demo=true; STATE.fetchedAt=Date.now();
+    banner('Demo data — could not load the snapshot. See the README to set it up.'); }
   render();
-}
-
-function slim(r, commits, runs, pulls){
-  // one "agent" per workflow; runs arrive newest first (same shape as scripts/snapshot-shape.mjs)
-  const wf={}; runs.forEach(x=>{ (wf[x.name] ||= []).push(x); });
-  const run=x=>({status:x.status, concl:x.conclusion, date:x.updated_at, url:x.html_url, event:x.event});
-  return {
-    name:r.name, full:r.full_name, desc:r.description||'', url:r.html_url, home:r.homepage||(r.has_pages?`https://${r.owner.login}.github.io/${r.name}/`:''),
-    lang:r.language||'—', pushed:r.pushed_at, priv:r.private, issues:pulls?Math.max(0,(r.open_issues_count||0)-pulls.length):(r.open_issues_count||0), prs:pulls?pulls.length:'—',
-    commits:commits.map(c=>({sha:c.sha.slice(0,7), msg:c.commit.message.split('\n')[0],
-      date:c.commit.author?.date, author:c.author?.login||c.commit.author?.name||'?', url:c.html_url,
-      who: (AI_RE.test(c.commit.message)||CLAUDE_RE.test(c.author?.login||c.commit.author?.name||'')) ? 'claude'
-         : BOT_RE.test((c.author?.login||'')+' '+(c.commit.author?.name||'')) ? 'bot' : 'you' })).map(c=>({...c, ai:c.who!=='you'})),
-    workflows:Object.entries(wf).map(([name,g])=>({name, ...run(g[0]), runs:g.slice(0,5).map(run)})),
-  };
 }
 
 const syncLabel=()=>{ const a=ago(STATE.fetchedAt);
@@ -354,7 +301,9 @@ const COL = {ok:'#41e08a',idle:'#f2b84b',fail:'#ff5d6c',run:'#3fd7e8',dormant:'#
    The satellite dots, the agents list and the agent detail all read from here. */
 const wfStatus = w => w.status!=='completed'?'running': w.concl==='failure'?'fail': w.concl==='success'?'ok':'idle';
 const runResult = x => x.status!=='completed'?'running': x.concl==='success'?'succeeded': x.concl==='failure'?'failed': (x.concl||'no result');
-const localAgents = () => CONFIG.localAgents.filter(a=>!(STATE.shared && STATE.marked.has(a.repo)));
+// Local agents are shown only when their repo is in the loaded data (or they have no repo),
+// and never for a repo that is hidden in shared view.
+const localAgents = () => CONFIG.localAgents.filter(a=>(!a.repo || STATE.all.some(r=>r.name===a.repo)) && !(STATE.shared && STATE.marked.has(a.repo)));
 const localAgent = a => ({...a, id:(a.repo||'')+'::'+a.name, live:false, kind:a.schedule||'Local', date:a.lastRun});
 function repoAgents(r){
   return [...r.workflows.map(w=>({ id:r.name+'::'+w.name, live:true, name:w.name, repo:r.name, kind:'GitHub Action',
@@ -551,18 +500,18 @@ function drawAgent(a, r){
 /* ---------- demo data (shown only when GitHub is unreachable) ---------- */
 function demo(){
   const now=Date.now(), mk=(n,aiShare,spread)=>[...Array(n)].map((_,i)=>{ const ai=Math.random()<aiShare;
-    return {sha:Math.random().toString(16).slice(2,9), msg:(ai?['Add OpenAlex sync','Refactor pipeline view','Fix CSV import edge case','Add tender filters','Polish map layer']:['tweak copy','update data','wip','styles'])[i%(ai?5:4)],
-      who:ai?'claude':'you', full:'', date:new Date(now-Math.random()*spread*DAY).toISOString(), author:ai?'claude':'venturinodino-creator', url:'#', ai}; });
+    return {sha:Math.random().toString(16).slice(2,9), msg:(ai?['Add sync job','Refactor list view','Fix import edge case','Add filters','Polish layout']:['tweak copy','update data','wip','styles'])[i%(ai?5:4)],
+      who:ai?'claude':'you', full:'', date:new Date(now-Math.random()*spread*DAY).toISOString(), author:ai?'claude':USER, url:'#', ai}; });
   const R=(name,lang,desc,n,ai,spread,wf)=>({name,full:USER+'/'+name,desc,url:'https://github.com/'+USER+'/'+name,home:`https://${USER}.github.io/${name}/`,lang,
     pushed:new Date(now-spread*0.1*DAY).toISOString(),priv:false,issues:Math.floor(Math.random()*4),prs:Math.floor(Math.random()*2),commits:mk(n,ai,spread),workflows:wf||[]});
   const wf=(name,concl,d)=>({name,status:'completed',concl,date:new Date(now-d*DAY).toISOString(),url:'#',event:'schedule'});
   return [
-    R('netherlands-crm','JavaScript','NL research CRM — institutions, deals, tenders',64,.75,30,[wf('pages-build-deployment','success',.5)]),
-    R('denmark-crm','JavaScript','DK research CRM',38,.7,45,[wf('pages-build-deployment','success',3)]),
-    R('aeeg-offtaker-crm','JavaScript','AEEG offtaker sales CRM',27,.8,20),
-    R('insightflow','TypeScript','Vision & Dream Journal',18,.6,90),
-    R('ai-exit-board','Python','Job watcher + application tracker',22,.85,12,[wf('daily-watch','failure',1)]),
-    R('hex-strategy','JavaScript','Turn-based hex strategy game',15,.9,10),
+    R('alpha-crm','JavaScript','Example CRM',64,.75,30,[wf('pages-build-deployment','success',.5)]),
+    R('beta-crm','JavaScript','Example CRM',38,.7,45,[wf('pages-build-deployment','success',3)]),
+    R('gamma-sales','JavaScript','Example sales tracker',27,.8,20),
+    R('delta-journal','TypeScript','Example journal app',18,.6,90),
+    R('epsilon-watch','Python','Example watcher',22,.85,12,[wf('daily-watch','failure',1)]),
+    R('zeta-game','JavaScript','Example game',15,.9,10),
   ];
 }
 
