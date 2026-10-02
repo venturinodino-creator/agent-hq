@@ -3,40 +3,30 @@ import assert from 'node:assert/strict';
 import { applyVisibility } from '../scripts/visibility.mjs';
 
 const repos = [{ name: 'alpha' }, { name: 'beta' }, { name: 'gamma' }];
+const names = list => applyVisibility(repos, list).map(r => r.name);
 
-test('only repos that are switched on are shown', () => {
-  const { shown } = applyVisibility(repos, [
-    { name: 'alpha', visible: true }, { name: 'beta', visible: false }, { name: 'gamma', visible: true }]);
-  assert.deepEqual(shown.map(r => r.name), ['alpha', 'gamma']);
+test('only repos on the visible list are shown', () => {
+  assert.deepEqual(names(['alpha', 'gamma']), ['alpha', 'gamma']);
 });
 
-test('a repo missing from the list is hidden and reported as unknown', () => {
-  const { shown, unknown } = applyVisibility(repos, [{ name: 'alpha', visible: true }]);
-  assert.deepEqual(shown.map(r => r.name), ['alpha']);
-  assert.deepEqual(unknown, ['beta', 'gamma']);
-});
-
-test('a repo that is switched off is known, so it is not reported again', () => {
-  const { unknown } = applyVisibility(repos, [
-    { name: 'alpha', visible: false }, { name: 'beta', visible: false }, { name: 'gamma', visible: false }]);
-  assert.deepEqual(unknown, []);
+test('a repo that is not on the list is hidden', () => {
+  assert.deepEqual(names(['beta']), ['beta']);
 });
 
 test('an empty list hides everything', () => {
-  const { shown, unknown } = applyVisibility(repos, []);
-  assert.deepEqual(shown, []);
-  assert.deepEqual(unknown, ['alpha', 'beta', 'gamma']);
+  assert.deepEqual(names([]), []);
 });
 
-test('only a true flag switches a repo on', () => {
-  const { shown } = applyVisibility(repos, [
-    { name: 'alpha', visible: 'true' }, { name: 'beta', visible: 1 }, { name: 'gamma', visible: null }]);
-  assert.deepEqual(shown, []);
+test('names on the list that match no repo are ignored', () => {
+  assert.deepEqual(names(['alpha', 'deleted-repo']), ['alpha']);
 });
 
-test('list entries for repos that no longer exist are ignored', () => {
-  const { shown, unknown } = applyVisibility([{ name: 'alpha' }], [
-    { name: 'alpha', visible: true }, { name: 'deleted-repo', visible: true }]);
-  assert.deepEqual(shown.map(r => r.name), ['alpha']);
-  assert.deepEqual(unknown, []);
+test('names must match exactly, including case', () => {
+  assert.deepEqual(names(['Alpha', 'BETA']), []);
+});
+
+test('anything other than a list of names is refused rather than guessed at', () => {
+  for (const bad of [null, undefined, 'alpha', { alpha: true }, [1, 2], [null], [['alpha']]]) {
+    assert.throws(() => applyVisibility(repos, bad), /visible list/, JSON.stringify(bad));
+  }
 });

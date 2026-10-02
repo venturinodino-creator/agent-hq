@@ -1,7 +1,7 @@
 // Agent HQ snapshot — run by .github/workflows/snapshot.yml every hour.
 // Uses the GITHUB_TOKEN that GitHub Actions provides automatically (nothing to create or paste).
 // Writes data.json, which index.html reads instead of calling the GitHub API from your browser.
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { slim } from './snapshot-shape.mjs';
 import { applyVisibility } from './visibility.mjs';
 
@@ -18,31 +18,22 @@ async function gh(path) {
   return r.json();
 }
 
-// The private visibility list (Supabase). The secret key reads it past row level security.
-const SB_URL = process.env.SUPABASE_URL, SB_KEY = process.env.SUPABASE_SECRET_KEY;
-async function visibilityList(path, init = {}) {
-  const r = await fetch(`${SB_URL}/rest/v1/${path}`, { ...init,
-    headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json', ...init.headers } });
-  if (!r.ok) throw new Error(`visibility list → ${r.status}`);
-  return r;
+// Which repos the owner has switched ON. Asked through a small function in Supabase that anyone may call with
+// the public key (see supabase.json); it returns only the names that are ON, which this dashboard publishes
+// anyway, so a repo that is OFF is never named here. No secret is needed, so none is stored in this repo.
+async function visibleNames() {
+  const { url, publishableKey } = JSON.parse(readFileSync(new URL('../supabase.json', import.meta.url), 'utf8'));
+  const r = await fetch(`${url}/rest/v1/rpc/agent_hq_visible_repos`, {
+    method: 'POST', headers: { apikey: publishableKey, 'Content-Type': 'application/json' }, body: '{}' });
+  if (!r.ok) throw new Error(`visibility list → HTTP ${r.status}`);
+  return r.json();
 }
 
-let list = (await gh(`/users/${USER}/repos?per_page=100&sort=pushed&type=owner`)).filter(r => r.name !== SELF);
-
-// Once the list is configured, any failure here throws before data.json is written,
-// so a broken list leaves the previous snapshot in place instead of publishing every repo.
-// With no Supabase settings at all, every repo is published (the behaviour before the list existed).
-if (SB_URL || SB_KEY) {
-  if (!SB_URL || !SB_KEY) throw new Error('visibility list: SUPABASE_URL and SUPABASE_SECRET_KEY must both be set');
-  const rows = await (await visibilityList('repo_visibility?select=name,visible')).json();
-  const { shown, unknown } = applyVisibility(list, rows);
-  if (unknown.length) {
-    await visibilityList('repo_visibility', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates' },
-      body: JSON.stringify(unknown.map(name => ({ name, visible: false }))) });
-  }
-  console.log(`Visibility: ${shown.length} of ${list.length} repos switched on, ${unknown.length} new`);
-  list = shown;
-}
+// Fail closed: if the list cannot be read or is not a plain list of names, this throws before data.json is
+// written, so the previous snapshot stays in place instead of every repo being published.
+const all = (await gh(`/users/${USER}/repos?per_page=100&sort=pushed&type=owner`)).filter(r => r.name !== SELF);
+const list = applyVisibility(all, await visibleNames());
+console.log(`Visibility: ${list.length} of ${all.length} repos switched on`);
 
 const since = new Date(Date.now() - 56 * DAY).toISOString();
 const repos = [];
