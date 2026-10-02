@@ -226,13 +226,8 @@ const CONFIG = {
   // Agents that run OUTSIDE GitHub (Cowork scheduled tasks, local scripts).
   // GitHub Actions workflows are detected automatically.
   // status: 'scheduled' | 'ok' | 'fail' | 'idle' | 'running'  (GitHub can't see these, so set it yourself)   · lastRun: ISO date (optional)
-  localAgents: [
-    { name:'NL Tender Scraper',  repo:'netherlands-crm', schedule:'Weekdays · Cowork', role:'TED + TenderNed + web sweep', status:'scheduled' },
-    { name:'Contacts Agent',     repo:'netherlands-crm', schedule:'On demand · Cowork', role:'Finds & enriches contacts', status:'scheduled' },
-    { name:'News Agent',         repo:'netherlands-crm', schedule:'On demand · Cowork', role:'Institution news digest', status:'scheduled' },
-    { name:'White-space Agent',  repo:'netherlands-crm', schedule:'On demand · Cowork', role:'Product gap analysis', status:'scheduled' },
-    { name:'Job Watcher',        repo:null,              schedule:'Daily · local',      role:'Scans 177 AI-company ATS feeds', status:'scheduled' },
-  ],
+  // e.g. { name:'NL Tender Scraper', repo:'netherlands-crm', schedule:'Weekdays · Cowork', role:'TED + TenderNed + web sweep', status:'scheduled' }
+  localAgents: [],
   // Repo that holds this page + the hourly snapshot Action (data.json)
   snapshotRepo: 'agent-hq',
 };
@@ -305,8 +300,12 @@ const runResult = x => x.status!=='completed'?'running': x.concl==='success'?'su
 // and never for a repo that is hidden in shared view.
 const localAgents = () => CONFIG.localAgents.filter(a=>(!a.repo || STATE.all.some(r=>r.name===a.repo)) && !(STATE.shared && STATE.marked.has(a.repo)));
 const localAgent = a => ({...a, id:(a.repo||'')+'::'+a.name, live:false, kind:a.schedule||'Local', date:a.lastRun});
+// A workflow is an agent only if it runs on its own schedule or is started by hand. Workflows that only react
+// to a push or pull request (CI, smoke checks) and GitHub's own Pages deploy are plumbing, not agents.
+const AGENT_EVENTS = ['schedule','workflow_dispatch'];
+const isAgent = w => [w, ...(w.runs||[])].some(x=>AGENT_EVENTS.includes(x.event));
 function repoAgents(r){
-  return [...r.workflows.map(w=>({ id:r.name+'::'+w.name, live:true, name:w.name, repo:r.name, kind:'GitHub Action',
+  return [...r.workflows.filter(isAgent).map(w=>({ id:r.name+'::'+w.name, live:true, name:w.name, repo:r.name, kind:'GitHub Action',
             role:w.event, date:w.date, url:w.url, status:wfStatus(w), run:w })),
           ...localAgents().filter(a=>a.repo===r.name).map(localAgent)];
 }
@@ -317,10 +316,6 @@ const agentCol = a => a.live ? (a.status==='running'?COL.run: a.status==='fail'?
 
 function agents(){
   const list=allAgents();
-  // Claude as a contributor, per repo with AI commits
-  STATE.repos.forEach(r=>{ const n=r.commits.filter(c=>c.ai).length; if(n) list.push({
-    name:'Claude · builder', repo:r.name, kind:'Coding agent', role:n+' commits / 8 wks', status:'ok',
-    date:r.commits.find(c=>c.ai)?.date }); });
   const f=STATE.filter;
   return list.filter(a=>!f || (a.name+' '+(a.repo||'')+' '+(a.role||'')).toLowerCase().includes(f));
 }

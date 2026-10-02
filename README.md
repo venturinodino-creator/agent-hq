@@ -32,5 +32,6 @@ Changes apply at the next hourly snapshot; **Run workflow** applies them right a
 ## Notes
 - The dashboard updates every hour. **Run workflow** refreshes it right away.
 - Repos with no activity in the last 60 days are listed, but their details aren't fetched.
-- Your Cowork tasks (tender scraper, job watcher…) aren't visible to GitHub. Edit `localAgents` at the top of `index.html` to add or change them.
+- An agent is a workflow that runs on a schedule or is started by hand. CI, smoke checks and the Pages deploy still count toward a repo's health, but aren't listed as agents.
+- Cowork tasks aren't visible to GitHub. To show one, add it to `localAgents` at the top of `index.html`.
 - Private repos aren't included, because the built-in credentials can only see public ones.
