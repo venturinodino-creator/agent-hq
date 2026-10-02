@@ -57,7 +57,7 @@ button,input{font:inherit;color:inherit}
 .nav li.on{background:#0f2129;color:var(--cyan);border-left:2px solid var(--cyan)}
 .nav .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .nav .k{font-size:10px;color:var(--dim)}
-.nav .pv{background:none;border:0;padding:0 2px;cursor:pointer;color:var(--dim);font-size:10px;line-height:1;opacity:0}
+.nav .pv{background:none;border:0;padding:0 2px;cursor:pointer;color:var(--dim);font-size:10px;line-height:1;opacity:.55}
 .nav li:hover .pv,.nav .pv:focus-visible{opacity:1}
 .nav .pv.on{opacity:1;color:var(--amber)}
 .sec{padding:10px 14px 4px;font-size:10px;letter-spacing:.14em;color:var(--dim)}
@@ -508,6 +508,7 @@ function drawDetail(r){
   <div class="body">
     <h2>${esc(r.name)} ${r.priv?'<span class="tag">private</span>':''}</h2>
     <p>${esc(r.desc)||'No description — add one on GitHub.'}</p>
+    ${STATE.shared?'':`<div class="links" style="margin:0 0 8px"><button class="btn" data-pv="${esc(r.name)}">${STATE.marked.has(r.name)?'● hidden in shared view · click to show':'○ hide in shared view'}</button></div>`}
     <div class="stats">
       <div class="stat"><b>${r.commits.length}</b><span>commits · 8w</span></div>
       <div class="stat"><b>${r.commits.length?Math.round(ai/r.commits.length*100):0}%</b><span>by agents</span></div>
