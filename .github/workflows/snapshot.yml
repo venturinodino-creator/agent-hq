@@ -24,6 +24,9 @@ jobs:
         run: node scripts/snapshot.mjs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Private visibility list. Unset = publish every repo.
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
       - name: Commit data.json
         run: |
           git config user.name  "agent-hq-bot"
