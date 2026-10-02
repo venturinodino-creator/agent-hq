@@ -294,7 +294,7 @@ async function load(force=false){
       const active = (Date.now()-new Date(r.pushed_at))/DAY <= 60;
       if(!active){ out.push(slim(r,[],[],null)); continue; }
       const commits = await gh(`/repos/${r.full_name}/commits?per_page=100&since=${since}`);
-      const runs    = await gh(`/repos/${r.full_name}/actions/runs?per_page=20`);
+      const runs    = await gh(`/repos/${r.full_name}/actions/runs?per_page=100`);
       out.push(slim(r, commits||[], runs?.workflow_runs||[], null));
     }
     STATE.repos=out; STATE.fetchedAt=Date.now(); STATE.demo=false; STATE.source='live';
@@ -311,8 +311,9 @@ async function load(force=false){
 }
 
 function slim(r, commits, runs, pulls){
-  // latest run per workflow = one "agent"
-  const wf={}; runs.forEach(x=>{ if(!wf[x.name]) wf[x.name]=x; });
+  // one "agent" per workflow; runs arrive newest first (same shape as scripts/snapshot-shape.mjs)
+  const wf={}; runs.forEach(x=>{ (wf[x.name] ||= []).push(x); });
+  const run=x=>({status:x.status, concl:x.conclusion, date:x.updated_at, url:x.html_url, event:x.event});
   return {
     name:r.name, full:r.full_name, desc:r.description||'', url:r.html_url, home:r.homepage||(r.has_pages?`https://${r.owner.login}.github.io/${r.name}/`:''),
     lang:r.language||'—', pushed:r.pushed_at, priv:r.private, issues:pulls?Math.max(0,(r.open_issues_count||0)-pulls.length):(r.open_issues_count||0), prs:pulls?pulls.length:'—',
@@ -320,7 +321,7 @@ function slim(r, commits, runs, pulls){
       date:c.commit.author?.date, author:c.author?.login||c.commit.author?.name||'?', url:c.html_url,
       who: (AI_RE.test(c.commit.message)||CLAUDE_RE.test(c.author?.login||c.commit.author?.name||'')) ? 'claude'
          : BOT_RE.test((c.author?.login||'')+' '+(c.commit.author?.name||'')) ? 'bot' : 'you' })).map(c=>({...c, ai:c.who!=='you'})),
-    workflows:Object.values(wf).map(x=>({name:x.name, status:x.status, concl:x.conclusion, date:x.updated_at, url:x.html_url, event:x.event})),
+    workflows:Object.entries(wf).map(([name,g])=>({name, ...run(g[0]), runs:g.slice(0,5).map(run)})),
   };
 }
 
@@ -340,6 +341,7 @@ const COL = {ok:'#41e08a',idle:'#f2b84b',fail:'#ff5d6c',run:'#3fd7e8',dormant:'#
 /* One repo's agents: its GitHub Actions workflows + the local agents configured for it.
    The satellite dots, the agents list and the agent detail all read from here. */
 const wfStatus = w => w.status!=='completed'?'running': w.concl==='failure'?'fail': w.concl==='success'?'ok':'idle';
+const runResult = x => x.status!=='completed'?'running': x.concl==='success'?'succeeded': x.concl==='failure'?'failed': (x.concl||'no result');
 const localAgent = a => ({...a, id:(a.repo||'')+'::'+a.name, live:false, kind:a.schedule||'Local', date:a.lastRun});
 function repoAgents(r){
   return [...r.workflows.map(w=>({ id:r.name+'::'+w.name, live:true, name:w.name, repo:r.name, kind:'GitHub Action',
@@ -443,15 +445,17 @@ function drawGraph(repos, sel){
     const p=pos[r.name], st=health(r), col=COL[st], on=sel&&sel.name===r.name;
     const ang=Math.atan2(p.y-cy,p.x-cx), ca=Math.cos(ang), sa=Math.sin(ang);
     const all=repoAgents(r);
-    const sats=all.slice(0,14), span=Math.min(Math.PI*1.1, sats.length*0.24);
-    sats.forEach((s,j)=>{ const a=ang + (sats.length>1? -span/2 + j*span/(sats.length-1) : 0), d=30;
-      const sx=(p.x+Math.cos(a)*d).toFixed(1), sy=(p.y+Math.sin(a)*d).toFixed(1), c=agentCol(s);
-      // the ellipse is an invisible, larger click target stretched outward so neighbours don't overlap
-      h+=`<line x1="${p.x}" y1="${p.y}" x2="${sx}" y2="${sy}" stroke="${c}" stroke-opacity=".3"/>
+    // up to 14 agents on the inner ring; any more spill onto a second ring further out
+    const rings=[all.slice(0,14), all.slice(14,30)].filter(x=>x.length), rx=rings.length>1?5:10;
+    rings.forEach((sats,k)=>{ const d=30+k*11, span=Math.min(Math.PI*1.1, sats.length*0.24*30/d);
+      sats.forEach((s,j)=>{ const a=ang + (sats.length>1? -span/2 + j*span/(sats.length-1) : 0);
+        const sx=(p.x+Math.cos(a)*d).toFixed(1), sy=(p.y+Math.sin(a)*d).toFixed(1), c=agentCol(s);
+        // the ellipse is an invisible, larger click target stretched outward so neighbours don't overlap
+        h+=`<line x1="${p.x}" y1="${p.y}" x2="${sx}" y2="${sy}" stroke="${c}" stroke-opacity="${k?.15:.3}"/>
           <g class="sat${STATE.agent===s.id?' on':''}" data-agent="${esc(s.id)}" style="color:${c}"><title>${esc(s.name)}</title>
-            <ellipse cx="${sx}" cy="${sy}" rx="10" ry="4" fill="transparent" transform="rotate(${(a*180/Math.PI).toFixed(1)} ${sx} ${sy})"/>
-            <circle class="halo" cx="${sx}" cy="${sy}" r="6.5"/><circle class="d" cx="${sx}" cy="${sy}" r="3"/></g>`; });
-    const L = sats.length? 44 : 24, lx=p.x+ca*L, ly=p.y+sa*L + (Math.abs(sa)>0.7? (sa>0?10:-4):3);
+            <ellipse cx="${sx}" cy="${sy}" rx="${rx}" ry="4" fill="transparent" transform="rotate(${(a*180/Math.PI).toFixed(1)} ${sx} ${sy})"/>
+            <circle class="halo" cx="${sx}" cy="${sy}" r="6.5"/><circle class="d" cx="${sx}" cy="${sy}" r="3"/></g>`; }); });
+    const L = rings.length>1? 55 : rings.length? 44 : 24, lx=p.x+ca*L, ly=p.y+sa*L + (Math.abs(sa)>0.7? (sa>0?10:-4):3);
     const anchor = Math.abs(ca)<0.35?'middle':(ca>0?'start':'end');
     const nm = r.name.length>24? r.name.slice(0,23)+'…' : r.name;
     h+=`<g class="repo-node" data-id="${esc(r.name)}" opacity="${sel&&!on?.45:isDormant(r)?.6:1}">
@@ -495,7 +499,7 @@ function drawDetail(r){
 
 function drawAgent(a, r){
   const el=$('#detail'), w=a.run;
-  const result = !a.live ? (a.status||'scheduled') : w.status!=='completed' ? 'running' : w.concl==='success' ? 'succeeded' : w.concl==='failure' ? 'failed' : (w.concl||'no result');
+  const result = a.live ? runResult(w) : (a.status||'scheduled');
   el.hidden=false;
   el.innerHTML=`<div class="ph"><span><span class="dot ${DOT[a.status]||'s'}"></span> &nbsp;${esc(result)}</span><button class="x" id="closeD" aria-label="Close">×</button></div>
   <div class="body">
@@ -510,6 +514,7 @@ function drawAgent(a, r){
       <div class="stat"><b style="font-size:13px">${a.date?ago(a.date)+' ago':'—'}</b><span>last run</span></div>
     </div>
     <p>Not tracked live. GitHub can't see this agent, so these details come from the list typed into this page's config, not from real runs.</p>`}
+    ${a.live&&w.runs?.length?`<div class="ph" style="padding:6px 0;border:0">Recent runs</div><ul class="feed">${w.runs.map(x=>`<li><span class="dot ${DOT[wfStatus(x)]}" style="margin-top:4px"></span><span class="m"><a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(runResult(x))}</a> <span class="t">${ago(x.date)} · ${esc((x.event||'').replace(/_/g,' '))}</span></span></li>`).join('')}</ul>`:''}
     <div class="links">${a.url?`<a href="${esc(a.url)}" target="_blank" rel="noopener">↗ latest run on GitHub</a>`:''}${r&&a.live?`<a href="${esc(r.url)}/actions" target="_blank" rel="noopener">↗ all runs</a>`:''}</div>
   </div>`;
   $('#closeD').onclick=()=>select(r?r.name:'__all');
