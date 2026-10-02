@@ -79,6 +79,13 @@ svg#graph{position:absolute;inset:0;width:100%;height:100%}
 .sat:hover .d,.sat.on .d{fill:currentColor}
 .sat .halo{fill:none;stroke:none}
 .sat.on .halo{stroke:currentColor;stroke-opacity:.7}
+.sat .d,.sat .halo{transform-box:fill-box;transform-origin:center;transition:transform .3s ease-out}
+.sat.zoom .d,.sat.zoom .halo{transform:scale(1.5)}
+.callout{pointer-events:none;animation:fadein .25s ease-out}
+.callout rect{fill:#071016;stroke:currentColor;stroke-opacity:.6}
+.callout text{font-size:10px;fill:var(--txt)}
+.callout .s{font-size:9px;fill:currentColor}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
 
 /* floating detail card inside the stage */
 .detail{position:absolute;left:12px;top:12px;width:300px;max-height:calc(100% - 24px);overflow:auto;
@@ -441,6 +448,7 @@ function drawGraph(repos, sel){
   h+=`<circle cx="${cx}" cy="${cy}" r="5" fill="#3fd7e8"><animate attributeName="r" values="4;8;4" dur="2.4s" repeatCount="indefinite"/></circle>`;
 
   // repo nodes on the ring + their agents as satellites (fanned outward), labels pushed outside the ring
+  let callout='';   // message beside the clicked agent dot, drawn last so it sits on top
   repos.forEach((r,i)=>{
     const p=pos[r.name], st=health(r), col=COL[st], on=sel&&sel.name===r.name;
     const ang=Math.atan2(p.y-cy,p.x-cx), ca=Math.cos(ang), sa=Math.sin(ang);
@@ -454,7 +462,10 @@ function drawGraph(repos, sel){
         h+=`<line x1="${p.x}" y1="${p.y}" x2="${sx}" y2="${sy}" stroke="${c}" stroke-opacity="${k?.15:.3}"/>
           <g class="sat${STATE.agent===s.id?' on':''}" data-agent="${esc(s.id)}" style="color:${c}"><title>${esc(s.name)}</title>
             <ellipse cx="${sx}" cy="${sy}" rx="${rx}" ry="4" fill="transparent" transform="rotate(${(a*180/Math.PI).toFixed(1)} ${sx} ${sy})"/>
-            <circle class="halo" cx="${sx}" cy="${sy}" r="6.5"/><circle class="d" cx="${sx}" cy="${sy}" r="3"/></g>`; }); });
+            <circle class="halo" cx="${sx}" cy="${sy}" r="6.5"/><circle class="d" cx="${sx}" cy="${sy}" r="3"/></g>`;
+        if(STATE.agent===s.id){ const tx=(+sx+Math.cos(a)*18).toFixed(1), ty=(+sy+Math.sin(a)*18).toFixed(1), end=Math.cos(a)<0;
+          const msg = s.live ? runResult(s.run)+(s.date?' · '+ago(s.date)+(ago(s.date)==='now'?'':' ago'):'') : (s.status||'scheduled')+' · not tracked live';
+          callout=`<g class="callout" style="color:${c}"><rect rx="4"/><text x="${tx}" y="${ty}" style="text-anchor:${end?'end':'start'}">${esc(s.name)}<tspan class="s" x="${tx}" dy="12">${esc(msg)}</tspan></text></g>`; } }); });
     const L = rings.length>1? 55 : rings.length? 44 : 24, lx=p.x+ca*L, ly=p.y+sa*L + (Math.abs(sa)>0.7? (sa>0?10:-4):3);
     const anchor = Math.abs(ca)<0.35?'middle':(ca>0?'start':'end');
     const nm = r.name.length>24? r.name.slice(0,23)+'…' : r.name;
@@ -466,7 +477,13 @@ function drawGraph(repos, sel){
       <text x="${lx.toFixed(1)}" y="${(ly+11).toFixed(1)}" class="node-sub" style="text-anchor:${anchor}">${esc(r.lang)} · ${ago(r.pushed)}${all.length?' · '+all.length+' agents':''}</text></g>`;
   });
   if(!repos.length) h+=`<text x="${cx}" y="${cy+40}" class="node-sub">no repos match</text>`;
-  svg.setAttribute('viewBox',`0 0 ${W} ${H}`); svg.innerHTML=h;
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`); svg.innerHTML=h+callout;
+  const co=svg.querySelector('.callout');
+  if(co){ const t=co.querySelector('text'); let b=t.getBBox();
+    // keep the message inside the stage, then size its background to the text
+    const dx = b.x<8 ? 8-b.x : b.x+b.width>W-8 ? W-8-b.x-b.width : 0, dy = b.y<8 ? 8-b.y : b.y+b.height>H-8 ? H-8-b.y-b.height : 0;
+    if(dx||dy){ co.setAttribute('transform',`translate(${dx.toFixed(1)} ${dy.toFixed(1)})`); }
+    const r=co.querySelector('rect'); r.setAttribute('x',b.x-7); r.setAttribute('y',b.y-5); r.setAttribute('width',b.width+14); r.setAttribute('height',b.height+10); }
 }
 
 function drawDetail(r){
@@ -546,7 +563,9 @@ function banner(t){ const b=$('#banner'); b.style.display=t?'block':'none'; b.in
   document.documentElement.style.setProperty('--bh', t? (b.offsetHeight+10)+'px':'0px'); }
 document.addEventListener('click',e=>{
   const s=e.target.closest('.sat');
-  if(s){ selectAgent(s.dataset.agent); return; }
+  if(s){ selectAgent(s.dataset.agent);
+    // grow the clicked dot; it shrinks back when the mouse leaves it (see mousemove below)
+    setTimeout(()=>document.querySelector('.sat.on')?.classList.add('zoom'),30); return; }
   const back=e.target.closest('[data-back]');
   if(back){ e.preventDefault(); select(back.dataset.back); return; }
   const n=e.target.closest('.nav li[data-id], .repo-node');
@@ -554,6 +573,9 @@ document.addEventListener('click',e=>{
   const a=e.target.closest('.agents li');
   if(a){ if(a.dataset.agent) selectAgent(a.dataset.agent); else if(a.dataset.repo && STATE.repos.some(r=>r.name===a.dataset.repo)) select(a.dataset.repo); else if(a.dataset.url) window.open(a.dataset.url,'_blank','noopener'); }
 });
+// mousemove rather than mouseout: selecting an agent can re-centre the grid and move the dot out from under the cursor
+$('#graph').addEventListener('mousemove',e=>{ const z=document.querySelector('.sat.zoom');
+  if(z && !z.contains(e.target)) z.classList.remove('zoom'); });
 $('#btnDormant').onclick=()=>{ STATE.dormant=!STATE.dormant; store.set('hq.dormant',STATE.dormant); render(); };
 let rt; addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(render,120)});
 setInterval(()=>{$('#sync').textContent=syncLabel()},30000);
