@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Agent HQ admin</title>
+<style>
+:root{--bg:#05080b;--panel:#0b1319;--panel2:#0f1b24;--line:#16303d;--line2:#1d3644;--txt:#cfe0ea;--dim:#6b8497;--cyan:#3fd7e8;--green:#41e08a;--red:#ff5d6c;--amber:#f2b84b}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--txt);font:13px/1.5 ui-monospace,Menlo,Consolas,monospace}
+main{max-width:640px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:15px;letter-spacing:.14em;margin:0 0 4px}
+p{margin:6px 0;color:var(--dim)}
+.card{background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:16px;margin-top:16px}
+label{display:block;margin:10px 0 4px;color:var(--dim);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+input{width:100%;background:var(--panel2);color:var(--txt);border:1px solid var(--line2);border-radius:4px;padding:8px 10px;font:inherit}
+input:focus{outline:none;border-color:var(--cyan)}
+.btn{background:var(--panel2);color:var(--txt);border:1px solid var(--line2);border-radius:4px;padding:8px 12px;cursor:pointer;font:inherit}
+.btn:hover{border-color:var(--cyan);color:var(--cyan)}
+.btn.primary{border-color:var(--cyan);color:var(--cyan);margin-top:14px}
+.btn:disabled{opacity:.5;cursor:default}
+.bar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.err{color:var(--red);min-height:1.5em;margin-top:10px}
+.note{border:1px solid #5a4417;background:#1b1408;color:var(--amber);border-radius:6px;padding:8px 12px;margin-top:12px}
+ul{list-style:none;margin:12px 0 0;padding:0}
+li{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;border-top:1px dashed var(--line)}
+li:first-child{border-top:0}
+.name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.name small{color:var(--dim);margin-left:8px}
+.sw{flex:none;min-width:84px;text-align:center;border-radius:99px;padding:4px 10px;cursor:pointer;font:inherit;font-size:11px;letter-spacing:.08em;border:1px solid var(--line2);background:var(--panel2);color:var(--dim)}
+.sw[aria-checked="true"]{border-color:var(--green);color:var(--green)}
+.sw:disabled{opacity:.5}
+a{color:var(--cyan);text-decoration:none} a:hover{text-decoration:underline}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <h1>AGENT_HQ · ADMIN</h1>
+  <p>Choose which repos appear on the dashboard. A repo that is off is left out of the dashboard's data completely.</p>
+
+  <form class="card" id="login" hidden>
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="username" required>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" required>
+    <button class="btn primary" id="signin" type="submit">Sign in</button>
+    <div class="err" id="loginErr" role="alert"></div>
+  </form>
+
+  <section class="card" id="panel" hidden>
+    <div class="bar"><span id="who"></span><button class="btn" id="signout" type="button">Sign out</button></div>
+    <div class="note">Changes reach the dashboard at the next hourly snapshot. To apply them now, open
+      <a href="https://github.com/venturinodino-creator/agent-hq/actions/workflows/snapshot.yml" target="_blank" rel="noopener">the snapshot workflow</a>
+      and press <b>Run workflow</b>.</div>
+    <p id="count"></p>
+    <ul id="repos"></ul>
+    <div class="err" id="panelErr" role="alert"></div>
+  </section>
+</main>
+<script type="module" src="admin.js"></script>
+</body>
+</html>

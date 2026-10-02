@@ -1,10 +1,11 @@
 // Decides which repos the snapshot may publish. Pure: no network, no file access.
-// rows come from the private visibility list: [{ name, visible }].
-// A repo is hidden unless its row says visible === true, so a repo nobody has switched on never appears.
-export function applyVisibility(repos, rows) {
-  const on = new Map(rows.map(r => [r.name, r.visible === true]));
-  return {
-    shown: repos.filter(r => on.get(r.name) === true),
-    unknown: repos.filter(r => !on.has(r.name)).map(r => r.name),   // not in the list yet: register as off
-  };
+// `visibleNames` is the list of repo names switched ON in the owner's private list. A repo is shown only if
+// its name is on it, so a repo nobody has switched on never appears. Anything that is not a plain list of
+// names is refused rather than guessed at: the caller then stops and publishes nothing.
+export function applyVisibility(repos, visibleNames) {
+  if (!Array.isArray(visibleNames) || !visibleNames.every(n => typeof n === 'string')) {
+    throw new Error('visibility: the visible list is not a list of repo names');
+  }
+  const on = new Set(visibleNames);
+  return repos.filter(r => on.has(r.name));
 }
