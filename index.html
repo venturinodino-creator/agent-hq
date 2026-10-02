@@ -547,7 +547,7 @@ document.addEventListener('click',e=>{
   const n=e.target.closest('.nav li[data-id], .repo-node');
   if(n){ select(n.dataset.id); return; }
   const a=e.target.closest('.agents li');
-  if(a){ if(a.dataset.repo && STATE.repos.some(r=>r.name===a.dataset.repo)) select(a.dataset.repo); else if(a.dataset.url) window.open(a.dataset.url,'_blank','noopener'); }
+  if(a){ if(a.dataset.agent) selectAgent(a.dataset.agent); else if(a.dataset.repo && STATE.repos.some(r=>r.name===a.dataset.repo)) select(a.dataset.repo); else if(a.dataset.url) window.open(a.dataset.url,'_blank','noopener'); }
 });
 $('#btnDormant').onclick=()=>{ STATE.dormant=!STATE.dormant; store.set('hq.dormant',STATE.dormant); render(); };
 let rt; addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(render,120)});
